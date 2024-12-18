@@ -1,0 +1,4 @@
+headless: false
+max_scroll_attempts: 15
+image_load_attempts: 5
+network_timeout_seconds: 60
