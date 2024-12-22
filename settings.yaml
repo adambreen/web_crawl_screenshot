@@ -1,4 +1,19 @@
-headless: false
+headless: true
 max_scroll_attempts: 15
 image_load_attempts: 5
 network_timeout_seconds: 60
+
+# Example “dodgy” references:
+#  - apple-frontend-app.azurewebsites.net => apple.com
+#  - apple-dev-staging.azurewebsites.net => developer.apple.com
+
+domain_fixes:
+  - match_domain: apple.com
+    fix_rules:
+      - regex: "https://apple-frontend-app\\.azurewebsites\\.net"
+        replacement: "https://apple.com"
+
+  - match_domain: developer.apple.com
+    fix_rules:
+      - regex: "https://apple-dev-staging\\.azurewebsites\\.net"
+        replacement: "https://developer.apple.com"

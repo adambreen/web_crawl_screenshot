@@ -1,3 +1,6 @@
+# Our captured outputs and logs
+crawl_output/
+
 # macOS system files
 .DS_Store
 .AppleDouble

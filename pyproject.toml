@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "web_crawl_screenshot"
-version = "0.1.0"
+version = "0.2.0"
 description = "A tool to crawl websites like a human, take screenshots, build site structure maps, and diff against sitemap.xml"
 authors = ["Adam Breen <adam@adambreen.com>"]
 readme = "README.md"
@@ -9,9 +9,15 @@ homepage = "https://adambreen.com"
 repository = "https://github.com/adambreen/web_crawl_screenshot"
 documentation = "https://github.com/adambreen/web_crawl_screenshot/blob/main/README.md"
 
+# If you organize your code as a standard package directory (e.g., web_crawl_screenshot/main.py),
+# define a script entry point here. This allows `pipx install .` or `poetry install` to create
+# a CLI command called 'web-crawl-screenshot' that invokes `main` in `web_crawl_screenshot/main.py`.
+[tool.poetry.scripts]
+web-crawl-screenshot = "web_crawl_screenshot.main:main"
+
 [tool.poetry.dependencies]
 python = ">=3.11,<3.12"
-playwright = "^1.39.0"
+playwright = "^1.49.1"
 requests = "^2.31.0"
 beautifulsoup4 = "^4.12.2"
 pyyaml = "^6.0"
@@ -22,6 +28,9 @@ pytest = "^7.3.0"
 requests-mock = "^1.11.0"
 black = "^23.3.0"
 ruff = "^0.0.281"
+
+[tool.poetry.group.dev.dependencies]
+pytest-cov = "^6.0.0"
 
 [build-system]
 requires = ["poetry-core"]
