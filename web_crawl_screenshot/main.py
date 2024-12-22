@@ -18,25 +18,13 @@ from requests.exceptions import RequestException
 This script crawls one or multiple websites, capturing screenshots, HTML snapshots,
 and comparing discovered pages to the official sitemap.xml for each domain.
 
-Enhancements:
-1. Python logging => logs to console & timestamped file.
-2. BFS approach => only 'content' links are enqueued (skipping mailto, nav/footer duplicates).
-3. Handling multiple domain-fix rules in a YAML 'domain_fixes' array (for "dodgy" sitemaps).
-4. Output is timestamped under crawl_output/<timestamp>, ensuring each run is separate.
+Key fix for BFS: Convert relative links (e.g. "/use-cases/health") into absolute 
+("https://veridocglobal.com/use-cases/health") before page.goto(), skipping
+javascript:void(0), '#' or mailto links.
 
-Example YAML snippet for domain fixes:
-    domain_fixes:
-      - match_domain: veridocglobal.com
-        fix_rules:
-          - regex: "https://vdg-frontend-app\\.azurewebsites\\.net"
-            replacement: "https://veridocglobal.com"
-      - match_domain: veridocsign.com
-        fix_rules:
-          - regex: "https://vdg-sign-frontend\\.azurewebsites\\.net"
-            replacement: "https://veridocsign.com"
-
-All BFS artifacts (screenshots, HTML, JSON, logs) appear under:
-    crawl_output/<timestamp>/<domain>/
+We also:
+ - Create a larger viewport.
+ - Scroll back to top & pause before capturing screenshots to show sticky headers.
 """
 
 # ------------- Default Config -------------
@@ -96,13 +84,14 @@ def load_config(settings_file: Optional[str]) -> Dict[str, object]:
 
 def is_internal_link(base: str, link: str) -> bool:
     """
-    Return True if 'link' is internal (same domain or relative path).
+    Return True if 'link' is on the same domain (or relative).
     Example: base='https://veridocglobal.com', link='https://veridocglobal.com/faq'
     """
     if not link:
         return False
     parsed_link = urlparse(link)
     parsed_base = urlparse(base)
+    # If netloc is empty, it was relative. If netloc matches base, it's internal.
     return (parsed_link.netloc == parsed_base.netloc) or (parsed_link.netloc == "")
 
 
@@ -255,7 +244,7 @@ def extract_links(page: Page) -> Dict[str, List[Dict[str, str]]]:
     Extract all a[href] plus button[onclick*='window.location'], categorize them into:
       - primary_navigation (header nav a[href])
       - footer (footer a[href])
-      - content (everything else, minus duplicates from above)
+      - content (everything else).
     """
     # 1) Primary nav
     primary_nav_links: List[Dict[str, str]] = []
@@ -298,7 +287,7 @@ def extract_links(page: Page) -> Dict[str, List[Dict[str, str]]]:
         if match:
             button_links.append({"href": match.group(1).strip(), "text": txt.strip()})
 
-    # Convert nav/footer to sets
+    # Convert nav/footer links to sets to avoid duplicates
     primary_nav_set = {(lnk["href"], lnk["text"]) for lnk in primary_nav_links}
     footer_set = {(lnk["href"], lnk["text"]) for lnk in footer_links_list}
 
@@ -330,8 +319,8 @@ def crawl_page(
     config: Dict[str, object],
 ) -> List[Tuple[str, str]]:
     """
-    BFS-crawl a single page:
-    - Goto => wait for spinner => scroll => screenshot => HTML => extract links => skip mailto => BFS from content only
+    Visit the page with Playwright (goto), do lazy-load scroll, screenshot, and extract BFS links.
+    Return a list of (absolute_url, link_text) for BFS.
     """
     logger.info(f"Visiting: {url}")
     try:
@@ -348,7 +337,9 @@ def crawl_page(
     scroll_to_bottom(page, config)
     ensure_all_images_loaded(page, config)
 
-    page.evaluate("window.scrollTo(0, 0)")  # sticky nav fix
+    # Scroll back top so sticky header is visible
+    page.evaluate("window.scrollTo(0, 0)")
+    time.sleep(1)  # let the header re-render
 
     title: str = page.title()
 
@@ -392,14 +383,24 @@ def crawl_page(
     # BFS => only enqueue content links
     found_links: List[Tuple[str, str]] = []
     for lnk in link_categories["content"]:
-        href = lnk["href"]
-        txt = lnk["text"]
-        # skip mailto
-        if href.startswith("mailto:"):
+        raw_href = lnk["href"]
+        link_text = lnk["text"]
+
+        # skip mailto, #, or javascript: links
+        if (
+            not raw_href
+            or raw_href.startswith("mailto:")
+            or raw_href.startswith("#")
+            or raw_href.startswith("javascript:")
+        ):
             continue
+
+        # Convert relative => absolute
+        absolute_url = urljoin(url, raw_href)
+
         # BFS if internal, not visited
-        if is_internal_link(url, href) and href not in visited:
-            found_links.append((href, txt))
+        if is_internal_link(url, absolute_url) and absolute_url not in visited:
+            found_links.append((absolute_url, link_text))
 
     logger.info(f"Found {len(found_links)} BFS links from content on {url}.")
     return found_links
@@ -415,7 +416,6 @@ def crawl_site(
     1) parse sitemap (with domain_fixes)
     2) BFS => store screenshots, html, JSON
     3) Compare discovered vs. official sitemap => diff
-    All artifacts saved in domain-specific subfolders under output_root.
     """
     parsed = urlparse(start_url)
     base_domain = f"{parsed.scheme}://{parsed.netloc}"
@@ -432,11 +432,17 @@ def crawl_site(
     sitemap_urls = parse_sitemap(sitemap_url, base_domain, config)
 
     headless = config.get("headless", False)
+    # ------------
+    # The main changes: create a new context with a big viewport:
+    # ------------
     try:
         with sync_playwright() as p:
             browser: Browser = p.chromium.launch(headless=headless)
-            page: Page = browser.new_page()
+            # Create bigger viewport so sticky nav is more likely fully visible
+            context = browser.new_context(viewport={"width": 1400, "height": 3000})
+            page: Page = context.new_page()
 
+            # BFS queue => list of (url_to_visit, parent_url, link_text)
             queue: List[Tuple[str, Optional[str], Optional[str]]] = [
                 (start_url, None, None)
             ]
@@ -460,7 +466,10 @@ def crawl_site(
                     if link_url not in visited:
                         queue.append((link_url, current_url, link_text))
 
+            # Clean up
+            context.close()
             browser.close()
+
     except Exception as e:
         logger.error(f"Fatal error crawling {start_url}: {e}")
 
@@ -496,11 +505,12 @@ def main() -> None:
     CLI entry point:
     - Single site => --url https://veridocglobal.com
     - Multiple sites => --config sites.json
-    - YAML config => --settings-file settings.yaml (for domain_fixes, timeouts, etc.)
+    - YAML config => --settings-file settings.yaml (for domain_fixes, etc.)
     """
     parser = argparse.ArgumentParser(
         description=(
-            "BFS-crawl websites, capture screenshots/HTML, compare vs. sitemap.xml, and store output in timestamped folders."
+            "BFS-crawl websites, capture screenshots/HTML, compare vs. sitemap.xml, "
+            "and store output in timestamped folders."
         )
     )
     parser.add_argument("--url", help="Single site to crawl.")

@@ -1,3 +1,7 @@
+Below is a **merged** version of your README that reflects your “correct” text **plus** the relevant clarifications and details that were in the newer version. It should capture **all** important points from both sources:
+
+---
+
 # Web Crawl Screenshot and Sitemap Diff Tool
 
 [![CI Tests](https://img.shields.io/badge/CI-Tests%20Passing-green)](#)
@@ -5,21 +9,21 @@
 
 ## Overview
 
-This tool crawls one or more websites in a manner closely approximating real user browsing. It captures **screenshots** and **HTML** for each discovered page, and then **compares** the actual navigable pages to the site’s `sitemap.xml` to highlight discrepancies.
+This tool crawls one or more websites in a manner closely approximating real user browsing. It captures **screenshots** and **HTML** for each discovered page, then **compares** the actual navigable pages to each site’s `sitemap.xml` to highlight discrepancies.
 
 **Key Highlights**:
-- **BFS Crawler** that explores internal “content” links (skipping nav/footer/mailto).
-- **Screenshots & HTML** saved for each page.
+- **BFS Crawler** that explores internal “content” links (skipping nav/footer/mailto/`javascript:void(0)`, etc.).
+- **Screenshots & HTML** saved for each discovered page.
 - **Timestamped Output** prevents overwriting old runs.
 - **Configurable** via YAML (headless mode, domain fixes, timeouts, etc.).
-- **Log** is written to console and a timestamped file in `crawl_output/<timestamp>/`.
+- **Log** is written to both console and a timestamped file in `crawl_output/<timestamp>/`.
 
 ---
 
 ## Installation
 
 **Prerequisites**:
-- Python 3.11.x
+- Python **3.11.x**
 - [Poetry](https://python-poetry.org/)
 - System dependencies for [Playwright](https://playwright.dev/) (e.g., `poetry run playwright install`).
 
@@ -28,11 +32,11 @@ This tool crawls one or more websites in a manner closely approximating real use
    poetry install
    poetry run playwright install
    ```
-   Installs Python dependencies and the necessary browsers (Chromium, etc.).
+   This sets up all dependencies and downloads the necessary browsers (e.g., Chromium).
 
 2. **Folder Structure**:
    - `web_crawl_screenshot/`:
-     - `main.py`: BFS logic, domain fixes, logging, etc.
+     - `main.py`: BFS logic, sitemap diffs, domain fixes, etc.
    - `tests/`:
      - `test_main.py`: Comprehensive tests using `pytest`.
 
@@ -42,20 +46,21 @@ This tool crawls one or more websites in a manner closely approximating real use
 
 ### Single-Site Crawl
 
-If you have **one** target domain (e.g., `https://apple.com`):
+To crawl **one** site (e.g., `https://apple.com`):
 
 ```bash
-poetry run python main.py --url https://apple.com
+poetry run python -m web_crawl_screenshot.main --url https://apple.com
 ```
 
 **Result**:  
-- A folder named `crawl_output/<timestamp>/apple.com/` is created.  
-- Inside, you’ll see `screenshots/`, `html/`, plus JSON files for site structure and sitemap diffs.  
-- A log file named `web_crawl_log_<timestamp>.txt` also appears in `crawl_output/<timestamp>/`.
+- A timestamped folder `crawl_output/<timestamp>/apple.com/` is created.  
+- Inside it:
+  - `screenshots/`, `html/`, plus JSON files: `site_structure_apple.com.json` and `sitemap_diff_apple.com.json`.  
+  - A log file named `web_crawl_log_<timestamp>.txt` appears in `crawl_output/<timestamp>/`.
 
 ### Multiple-Site Crawl
 
-If you have a JSON file (e.g., `config.json`) like this:
+If you have a JSON file (`config.json`) like:
 
 ```json
 {
@@ -66,23 +71,23 @@ If you have a JSON file (e.g., `config.json`) like this:
 }
 ```
 
-Then run:
+then run:
 
 ```bash
-poetry run python main.py --config config.json
+poetry run python -m web_crawl_screenshot.main --config config.json
 ```
 
 **Result**:  
-- Each domain (`apple.com`, `developer.apple.com`) has its own subfolder within `crawl_output/<timestamp>/`.
+- Each domain (`apple.com`, `developer.apple.com`) gets its own subfolder under `crawl_output/<timestamp>/`.
 
 ---
 
 ## Dodgy Sitemaps
 
-Some sitemaps might reference staging domains (e.g., `my-frontend-app.azurewebsites.net`) instead of your real domain (`apple.com`). You can **fix** those references via a YAML config, like this:
+Some sitemaps reference staging domains (e.g., `my-frontend-app.azurewebsites.net`) instead of your real domain (e.g., `apple.com`). You can **fix** those references via a YAML config, for **either** single or multiple sites. For example:
 
 ```yaml
-headless: false  # or true if you prefer headless
+headless: false
 max_scroll_attempts: 15
 domain_fixes:
   - match_domain: apple.com
@@ -95,27 +100,43 @@ domain_fixes:
         replacement: "https://developer.apple.com"
 ```
 
-Then run:
+### Single-Site Example with Dodgy Sitemaps
 
 ```bash
-poetry run python main.py \
+poetry run python -m web_crawl_screenshot.main \
   --url https://apple.com \
   --settings-file my_settings.yaml
 ```
 
-The crawler will parse `my_settings.yaml`, see any “dodgy” references in `sitemap.xml`, and normalize them accordingly.
+### Multi-Site Example with Dodgy Sitemaps
+
+```bash
+poetry run python -m web_crawl_screenshot.main \
+  --config config.json \
+  --settings-file my_settings.yaml
+```
+
+In either scenario, the crawler parses your `my_settings.yaml`, sees any “dodgy” references in each sitemap, and normalizes them accordingly.
 
 ---
 
 ## Why Headless=False?
 
-By default, you might **see**:
+By default, you might see something like:
 
 ```yaml
 headless: false
 ```
 
-in your YAML. This is ideal for **local debugging**—you’ll see the Playwright browser window open and pages load in real time. For **CI** or large-scale runs, set `headless: true` to run invisibly.
+in your YAML config. This is often **recommended** for sites with heavy JavaScript or lazy-loading, because running in a **non-headless** (visible) mode can help ensure you **accurately render** dynamic elements before the screenshot is taken. It’s also great for **debugging**: you’ll see the Playwright browser window open and can confirm whether a site’s dynamic features are fully loaded.
+
+For production or CI, where performance is paramount, you can switch to:
+
+```yaml
+headless: true
+```
+
+But be aware that **some sites may not** render identically in headless mode. If you notice missing sections or incomplete screenshots, revert to `headless: false`.
 
 ---
 
@@ -143,10 +164,10 @@ crawl_output/
         └── sitemap_diff_developer.apple.com.json
 ```
 
-- **`web_crawl_log_2024-12-22_16-45.txt`**: All console messages.  
-- **`<domain>/screenshots/` & `html/`**: Captures of each visited page.  
-- **`site_structure_<domain>.json`**: BFS-based data about titles, links, etc.  
-- **`sitemap_diff_<domain>.json`**: Highlights what the sitemap claims vs. what BFS discovered.
+- **`web_crawl_log_2024-12-22_16-45.txt`**: Console/log output.  
+- **`<domain>/screenshots/` & `html/`**: Collected page captures.  
+- **`site_structure_<domain>.json`**: BFS-based link and title data.  
+- **`sitemap_diff_<domain>.json`**: Compares sitemap references vs. what BFS found.
 
 ---
 
@@ -180,19 +201,17 @@ poetry run pytest
 ```
 
 **Key Checks**:
-- BFS logic (mail-to skipping, content-only queue).
-- Sticky nav fix (`scrollTo(0,0)`).
-- Sitemaps with domain_fixes in YAML.
-- Basic CLI argument validation (either `--url` or `--config`).
-
-You can also integrate `pytest` with any CI provider to ensure reliability.
+- BFS logic (mailto skipping, “content-only” link queue).
+- Sticky nav fix (`scrollTo(0, 0)`).
+- Domain fixes (in YAML).
+- Basic CLI argument validation (must specify `--url` or `--config`).
 
 ---
 
 ## Future Enhancements
 
-- **Comparing Two Crawls**: Create a script or LLM prompt to compare old vs. new runs for changes in layout or discovered pages.  
+- **Comparing Two Crawls**: A script or LLM prompt to compare old vs. new runs for layout or discovered-page changes.  
 - **Parallel BFS**: Speed up large-site crawling with concurrency.  
 - **Enhanced Link Categorization**: Distinguish multiple nav bars or submenus.  
 
-Enjoy your BFS-based web crawler, screenshots, and detailed diffs against your sitemaps!
+Enjoy your BFS-based web crawler, screenshots, and diffs against your sitemaps!
